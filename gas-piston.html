@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>気体分子の運動とピストン</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f3f5f8;--fg:#1c2430;--sub:#5b6675;--panel:#fff;--line:#c9d0da;--metal:#aab4c2;--metal2:#7d8898}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12161c;--fg:#e7ebf1;--sub:#93a0b2;--panel:#1b2129;--line:#333d4a;--metal:#5d6877;--metal2:#8b97a8}}
+:root[data-theme="dark"]{--bg:#12161c;--fg:#e7ebf1;--sub:#93a0b2;--panel:#1b2129;--line:#333d4a;--metal:#5d6877;--metal2:#8b97a8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:"Hiragino Sans","Yu Gothic","Noto Sans JP",sans-serif;line-height:1.6}
+main{max-width:640px;margin:0 auto;padding:20px 16px 32px}
+h1{font-size:1.3rem;margin:0 0 4px}
+p.lead{margin:0 0 14px;color:var(--sub);font-size:.92rem}
+.stage{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px}
+canvas{display:block;width:100%;height:auto}
+.ctl{margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.ctl label{display:flex;justify-content:space-between;font-weight:600;margin-bottom:6px}
+input[type=range]{width:100%;height:32px;accent-color:#e5533d}
+.read{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:10px;text-align:center}
+.read div{border:1px solid var(--line);border-radius:8px;padding:6px 4px}
+.read b{display:block;font-size:1.15rem;font-variant-numeric:tabular-nums}
+.read span{font-size:.78rem;color:var(--sub)}
+.flow{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:6px}
+.flow li{display:flex;gap:10px;align-items:center;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--sub);font-size:.9rem;transition:background .3s,color .3s,border-color .3s}
+.flow li i{font-style:normal;font-weight:700;width:1.6em;height:1.6em;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;flex:none;font-size:.8rem}
+.flow.up li{color:var(--fg);border-color:#e5533d;background:rgba(229,83,61,.10)}
+.flow.up li i{background:#e5533d;color:#fff;border-color:#e5533d}
+.flow.down li{color:var(--fg);border-color:#4f8ef0;background:rgba(79,142,240,.10)}
+.flow.down li i{background:#4f8ef0;color:#fff;border-color:#4f8ef0}
+.flow-cap{margin:6px 2px 0;font-size:.82rem;color:var(--sub)}
+.note{margin:12px 2px 0;font-size:.85rem;color:var(--sub)}
+</style>
+</head>
+<body>
+<main>
+<h1>温度と気体分子の動き</h1>
+<p class="lead">温度を上げると分子が速く動き、ピストンが押し上げられて体積が増えます(圧力一定)。</p>
+<div class="stage"><canvas id="c" width="520" height="460" aria-label="シリンダー内の気体分子のアニメーション"></canvas></div>
+<div class="ctl">
+<label for="t"><span>温度</span><span id="tl">300 K</span></label>
+<input id="t" type="range" min="200" max="600" step="1" value="300">
+</div>
+<div class="ctl">
+<label for="n"><span>粒子数</span><span id="nl">38 個</span></label>
+<input id="n" type="range" min="8" max="90" step="1" value="38">
+<div class="read">
+<div><b id="rt">27 ℃</b><span>温度</span></div>
+<div><b id="rs">1.00</b><span>分子の速さ(相対)</span></div>
+<div><b id="rv">1.00</b><span>体積(相対)</span></div>
+<div><b id="rh">0</b><span>ピストンへの衝突(回/秒)</span></div>
+</div>
+</div>
+<ol class="flow" id="flow"></ol>
+<p class="flow-cap" id="cap"></p>
+<p class="note">体積は絶対温度と粒子数(分子の数)にどちらも比例して増えます。粒子数が増えると衝突が増えて圧力が上がり、ピストンが押し上げられて体積が増えます。実際の分子の速さは温度の平方根に比例しますが、違いが見やすいよう、このアニメーションでは速さの変化を大きめに強調しています。</p>
+</main>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const W=520,H=460,dpr=Math.min(window.devicePixelRatio||1,2);
+cv.width=W*dpr;cv.height=H*dpr;ctx.scale(dpr,dpr);
+const X0=110,X1=410,BOT=420,K=0.55,R=6,T0=300,N0=38;
+let N=38;
+const slider=document.getElementById('t');
+let T=300,Tshown=300,hCur=T*K;
+const mols=[];
+function newMol(){
+  const a=Math.random()*Math.PI*2,s=110+Math.random()*80,top=BOT-Tshown*K;
+  return {x:X0+R+Math.random()*(X1-X0-2*R),y:BOT-R-Math.random()*Math.max(1,(BOT-top-2*R)),vx:Math.cos(a)*s,vy:Math.sin(a)*s};
+}
+function setCount(n){
+  n=Math.max(1,Math.round(n));
+  while(mols.length<n)mols.push(newMol());
+  while(mols.length>n)mols.pop();
+  N=n;
+}
+setCount(N);
+slider.addEventListener('input',()=>{T=+slider.value});
+const nSlider=document.getElementById('n');
+nSlider.addEventListener('input',()=>{
+  const prev=N,val=+nSlider.value;
+  setCount(val);
+  document.getElementById('nl').textContent=nSlider.value+' 個';
+  if(val!==prev){setFlow(val>prev?'n1':'n-1');nLockUntil=performance.now()+1200;}
+});
+const mix=(a,b,t)=>a+(b-a)*t;
+function rr(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r)}
+let last=performance.now(),hits=0,rate=0,flash=0,dirNow=99,nLockUntil=0;
+const STEPS={
+ 1:['温度が上がる','分子が激しく動く','ピストンに強く、たくさんぶつかる → 内側からの圧力が増える','外の圧力(おもり)より大きくなり、ピストンが押し上げられて体積が増える'],
+ '-1':['温度が下がる','分子の動きがおだやかになる','ピストンへの衝突が弱く、少なくなる → 内側からの圧力が減る','外の圧力(おもり)に押されて、ピストンが下がり体積が減る'],
+ 0:['温度は一定','分子は一定の激しさで動く','ピストンへの衝突による圧力','おもりの圧力とつり合い、ピストンは止まる']};
+const CAP={1:'圧力が増えたぶんだけピストンが上がり、体積が増えると衝突が減って、やがて外の圧力とつり合います。',
+ '-1':'圧力が減ったぶんだけピストンが下がり、やがて外の圧力とつり合います。',0:'温度や粒子数のスライダーを動かすと、原因と結果のつながりが表示されます。',
+ n1:'体積が増えると衝突の密度が下がり、やがて外の圧力とつり合います。',
+ 'n-1':'体積が減ると衝突の密度が上がり、やがて外の圧力とつり合います。'};
+function setFlow(d){
+  if(d===dirNow)return;dirNow=d;
+  const fl=document.getElementById('flow');
+  fl.className='flow '+(d>0?'up':d<0?'down':'');
+  fl.innerHTML=STEPS[d].map((t,i)=>'<li><i>'+(i+1)+'</i><span>'+t+'</span></li>').join('');
+  document.getElementById('cap').textContent=CAP[d];
+}
+setFlow(0);
+function frame(now){
+  const dt=Math.min((now-last)/1000,0.033);last=now;
+  // 温度・体積をなめらかに追従
+  Tshown+=(T-Tshown)*Math.min(1,dt*4);
+  const hTarget=Math.min(BOT-70,Tshown*K*(N/N0));
+  hCur+=(hTarget-hCur)*Math.min(1,dt*5);
+  const top=BOT-hCur,sp=Math.pow(Tshown/T0,1.6);
+  const f=(Tshown-200)/400;
+  // 分子の更新
+  for(const m of mols){
+    m.x+=m.vx*sp*dt;m.y+=m.vy*sp*dt;
+    if(m.x<X0+R){m.x=X0+R;m.vx=Math.abs(m.vx)}
+    if(m.x>X1-R){m.x=X1-R;m.vx=-Math.abs(m.vx)}
+    if(m.y>BOT-R){m.y=BOT-R;m.vy=-Math.abs(m.vy)}
+    if(m.y<top+R){m.y=top+R;m.vy=Math.abs(m.vy);hits++;flash=Math.min(1,flash+.35)}
+  }
+  rate+=(hits/Math.max(dt,.001)-rate)*.05;hits=0;flash=Math.max(0,flash-dt*4);
+  if(now>nLockUntil)setFlow(T-Tshown>.8?1:T-Tshown<-.8?-1:0);
+  // 描画
+  ctx.clearRect(0,0,W,H);
+  const cs=getComputedStyle(document.documentElement);
+  const metal=cs.getPropertyValue('--metal').trim(),metal2=cs.getPropertyValue('--metal2').trim();
+  // ガスの色(青→赤)
+  const g=ctx.createLinearGradient(0,top,0,BOT);
+  g.addColorStop(0,`rgba(${mix(110,255,f)|0},${mix(170,90,f)|0},${mix(255,60,f)|0},${mix(.22,.55,f)})`);
+  g.addColorStop(1,`rgba(${mix(90,255,f)|0},${mix(150,50,f)|0},${mix(240,30,f)|0},${mix(.32,.75,f)})`);
+  ctx.fillStyle=g;ctx.fillRect(X0,top,X1-X0,hCur);
+  // 加熱の光
+  const hg=ctx.createRadialGradient(260,BOT+14,4,260,BOT+14,190);
+  hg.addColorStop(0,`rgba(255,110,40,${.15+.6*f})`);hg.addColorStop(1,'rgba(255,110,40,0)');
+  ctx.fillStyle=hg;ctx.fillRect(X0-40,BOT-40,X1-X0+80,90);
+  // 分子
+  for(const m of mols){
+    const hue=mix(210,4,f),lt=mix(58,50,f);
+    ctx.beginPath();ctx.arc(m.x,m.y,R,0,7);
+    ctx.fillStyle=`hsl(${hue} 85% ${lt}%)`;ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=1;ctx.stroke();
+  }
+  // シリンダー壁
+  ctx.fillStyle=metal;
+  rr(X0-14,60,14,BOT-60+14,3);ctx.fill();
+  rr(X1,60,14,BOT-60+14,3);ctx.fill();
+  rr(X0-14,BOT,X1-X0+28,14,3);ctx.fill();
+  // ピストン・ロッド・おもり
+  if(flash>0){ctx.fillStyle=`rgba(255,120,50,${flash*.9})`;ctx.fillRect(X0,top,X1-X0,4)}
+  ctx.fillStyle=metal2;rr(X0,top-14,X1-X0,14,3);ctx.fill();
+  ctx.fillRect(258,top-50,8,36);
+  ctx.fillStyle=metal;rr(215,top-72,92,24,4);ctx.fill();
+  ctx.fillStyle=getComputedStyle(document.body).color;
+  ctx.font='600 13px sans-serif';ctx.textAlign='center';ctx.fillText('おもり',261,top-55);
+  // 高さの目盛り
+  ctx.strokeStyle=metal2;ctx.setLineDash([4,4]);ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(X1+22,top);ctx.lineTo(X1+22,BOT);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle=getComputedStyle(document.body).color;ctx.textAlign='left';
+  ctx.fillText('体積',X1+28,(top+BOT)/2+4);
+  // 表示
+  const Tk=Math.round(Tshown);
+  document.getElementById('tl').textContent=Tk+' K';
+  document.getElementById('rt').textContent=(Tk-273)+' ℃';
+  document.getElementById('rs').textContent=sp.toFixed(2);
+  document.getElementById('rv').textContent=(hCur/(T0*K)).toFixed(2);
+  document.getElementById('rh').textContent=Math.round(rate);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
